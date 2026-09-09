@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -127,7 +127,6 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
       var line = raw.trim();
       if (line.isEmpty || _isServiceLine(line)) continue;
 
-      // Пропуск строк умножения количества вида "1.000 * 350.00"
       if (RegExp(r'^\s*([0-9.,]+)\s*(\*|x|х)\s*([0-9.,]+)').hasMatch(line)) {
         continue;
       }
@@ -276,16 +275,20 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStatus = 'Распознавание текста чека...';
+      _processingStatus = 'Распознавание кириллицы (Tesseract)...';
     });
 
     try {
-      final inputImage = InputImage.fromFile(File(file.path));
-      final textRecognizer = TextRecognizer();
-      final recognizedText = await textRecognizer.processImage(inputImage);
-      await textRecognizer.close();
+      final String extractedText = await TesseractOcr.extractText(
+        file.path,
+        language: 'rus',
+        args: {
+          'psm': '6',
+          'preserve_interword_spaces': '1',
+        },
+      );
 
-      final lines = recognizedText.text.split(RegExp(r'[\n\r]+'));
+      final lines = extractedText.split(RegExp(r'[\n\r]+'));
       final foundItems = _extractItemsFromLines(lines);
 
       if (mounted) {
