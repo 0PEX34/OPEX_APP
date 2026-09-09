@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
@@ -265,6 +267,22 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     );
   }
 
+  // Прямое копирование языковой модели в обход AssetManifest.json
+  Future<void> _ensureTessDataReady() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final tessdataDir = Directory('${appDir.path}/tessdata');
+    if (!await tessdataDir.exists()) {
+      await tessdataDir.create(recursive: true);
+    }
+
+    final modelFile = File('${tessdataDir.path}/rus.traineddata');
+    if (!await modelFile.exists() || await modelFile.length() == 0) {
+      final ByteData data = await rootBundle.load('assets/tessdata/rus.traineddata');
+      final List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      await modelFile.writeAsBytes(bytes, flush: true);
+    }
+  }
+
   Future<void> _scanReceiptPhotoAuto(ImageSource source) async {
     final XFile? file = await _picker.pickImage(
       source: source,
@@ -275,11 +293,18 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStatus = 'Распознавание кириллицы (Tesseract)...';
+      _processingStatus = 'Подготовка модели кириллицы...';
     });
 
     try {
-      // В tesseract_ocr 0.5.0 язык передается позиционным аргументом
+      await _ensureTessDataReady();
+
+      if (mounted) {
+        setState(() {
+          _processingStatus = 'Распознавание кириллицы...';
+        });
+      }
+
       final String extractedText = await TesseractOcr.extractText(file.path);
 
       final lines = extractedText.split(RegExp(r'[\n\r]+'));
