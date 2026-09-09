@@ -1,7 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tesseract_ocr/tesseract_ocr.dart';
-import 'package:tesseract_ocr/ocr_engine_config.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -163,7 +163,9 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
   void _showParsedReviewDialog(List<BillItem> candidateItems) {
     if (candidateItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось найти позиции с ценами. Сделайте фото ровнее или используйте QR / голосовой ввод.')),
+        const SnackBar(
+          content: Text('Не удалось найти позиции с ценами. Попробуйте ввести голосом или через QR.'),
+        ),
       );
       return;
     }
@@ -175,10 +177,10 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Проверьте распознанный чек', style: TextStyle(fontSize: 18)),
+          title: const Text('Проверьте чек перед добавлением', style: TextStyle(fontSize: 18)),
           content: SizedBox(
             width: double.maxFinite,
-            height: 400,
+            height: 420,
             child: localList.isEmpty
                 ? const Center(child: Text('Все позиции удалены'))
                 : ListView.builder(
@@ -186,6 +188,7 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
                     itemBuilder: (context, index) {
                       final item = localList[index];
                       return Card(
+                        key: ValueKey(item.id),
                         margin: const EdgeInsets.symmetric(vertical: 4),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -194,8 +197,13 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
                               Expanded(
                                 flex: 3,
                                 child: TextFormField(
+                                  key: ValueKey('title_${item.id}'),
                                   initialValue: item.title,
-                                  decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    border: InputBorder.none,
+                                    hintText: 'Название',
+                                  ),
                                   onChanged: (val) => item.title = val,
                                 ),
                               ),
@@ -203,9 +211,15 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
                               Expanded(
                                 flex: 2,
                                 child: TextFormField(
+                                  key: ValueKey('price_${item.id}'),
                                   initialValue: item.price.toStringAsFixed(0),
                                   keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(isDense: true, suffixText: '₽', border: InputBorder.none),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    suffixText: '₽',
+                                    border: InputBorder.none,
+                                    hintText: '0',
+                                  ),
                                   onChanged: (val) {
                                     item.price = double.tryParse(val.replaceAll(',', '.')) ?? item.price;
                                   },
@@ -214,7 +228,9 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
                               IconButton(
                                 icon: const Icon(Icons.close, color: Colors.red, size: 20),
                                 onPressed: () {
-                                  setDialogState(() => localList.removeAt(index));
+                                  setDialogState(() {
+                                    localList.removeAt(index);
+                                  });
                                 },
                               ),
                             ],
@@ -230,7 +246,10 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
               child: const Text('Отмена'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () {
                 Navigator.pop(ctx);
                 setState(() => _items.addAll(localList));
@@ -256,23 +275,16 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStatus = 'Оффлайн-распознавание кириллицы (Tesseract)...';
+      _processingStatus = 'Распознавание текста чека...';
     });
 
     try {
-      final config = OCRConfig(
-        language: 'rus',
-        engine: OCREngine.tesseract,
-        options: {
-          'preserve_interword_spaces': '1',
-        },
-      );
-      final String extractedText = await TesseractOcr.extractText(
-        file.path,
-        config: config,
-      );
+      final inputImage = InputImage.fromFile(File(file.path));
+      final textRecognizer = TextRecognizer();
+      final recognizedText = await textRecognizer.processImage(inputImage);
+      await textRecognizer.close();
 
-      final lines = extractedText.split(RegExp(r'[\n\r]+'));
+      final lines = recognizedText.text.split(RegExp(r'[\n\r]+'));
       final foundItems = _extractItemsFromLines(lines);
 
       if (mounted) {
