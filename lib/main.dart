@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
@@ -118,9 +119,22 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     return false;
   }
 
+  String _cleanPriceString(String priceStr) {
+    return priceStr
+        .replaceAll('О', '0')
+        .replaceAll('о', '0')
+        .replaceAll('З', '3')
+        .replaceAll('з', '3')
+        .replaceAll('б', '6')
+        .replaceAll('В', '8')
+        .replaceAll('—', '.')
+        .replaceAll('-', '.')
+        .replaceAll(',', '.');
+  }
+
   List<BillItem> _extractItemsFromLines(List<String> rawLines) {
     final List<BillItem> parsed = [];
-    final priceRegex = RegExp(r'(\d+[.,]\d{2})|(\b\d{2,5}\b)');
+    final priceRegex = RegExp(r'(\d+[.,—\-]\d{2})|(\b\d{2,5}\b)');
     String pendingTitle = '';
 
     for (var raw in rawLines) {
@@ -134,8 +148,8 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
       final matches = priceRegex.allMatches(line).toList();
       if (matches.isNotEmpty) {
         final lastMatch = matches.last;
-        final priceStr = lastMatch.group(0)!.replaceAll(',', '.');
-        final priceVal = double.tryParse(priceStr);
+        final cleanP = _cleanPriceString(lastMatch.group(0)!);
+        final priceVal = double.tryParse(cleanP);
 
         var titlePart = line.substring(0, lastMatch.start).replaceAll(RegExp(r'[-=:#*.]+'), ' ').trim();
         if (titlePart.isEmpty && pendingTitle.isNotEmpty) {
@@ -164,7 +178,7 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     if (candidateItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Не удалось найти позиции с ценами. Попробуйте ввести голосом или через QR.'),
+          content: Text('Не удалось найти позиции с ценами. Попробуйте надиктовать голосом или ввести через QR.'),
         ),
       );
       return;
@@ -265,6 +279,25 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     );
   }
 
+  Future<File> _preprocessImage(String imagePath) async {
+    final bytes = await File(imagePath).readAsBytes();
+    img.Image? image = img.decodeImage(bytes);
+
+    if (image == null) return File(imagePath);
+
+    if (image.width > 1600) {
+      image = img.copyResize(image, width: 1600);
+    }
+
+    image = img.grayscale(image);
+    image = img.contrast(image, contrast: 150);
+
+    final preprocessedPath = '${imagePath}_prep.jpg';
+    final preprocessedFile = File(preprocessedPath);
+    await preprocessedFile.writeAsBytes(img.encodeJpg(image, quality: 90));
+    return preprocessedFile;
+  }
+
   Future<void> _scanReceiptPhotoAuto(ImageSource source) async {
     final XFile? file = await _picker.pickImage(
       source: source,
@@ -275,11 +308,19 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStatus = 'Распознавание текста чека...';
+      _processingStatus = 'Очистка и повышение резкости чека...';
     });
 
     try {
-      final inputImage = InputImage.fromFile(File(file.path));
+      final processedFile = await _preprocessImage(file.path);
+
+      if (mounted) {
+        setState(() {
+          _processingStatus = 'Распознавание текста...';
+        });
+      }
+
+      final inputImage = InputImage.fromFile(processedFile);
       final textRecognizer = TextRecognizer();
       final recognizedText = await textRecognizer.processImage(inputImage);
       await textRecognizer.close();
