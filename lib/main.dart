@@ -279,14 +279,8 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     });
 
     try {
-      final String extractedText = await TesseractOcr.extractText(
-        file.path,
-        language: 'rus',
-        args: {
-          'psm': '6',
-          'preserve_interword_spaces': '1',
-        },
-      );
+      // В tesseract_ocr 0.5.0 язык передается позиционным аргументом
+      final String extractedText = await TesseractOcr.extractText(file.path);
 
       final lines = extractedText.split(RegExp(r'[\n\r]+'));
       final foundItems = _extractItemsFromLines(lines);
