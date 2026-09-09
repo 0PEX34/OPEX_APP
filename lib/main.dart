@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image/image.dart' as img;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
@@ -119,28 +118,16 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     return false;
   }
 
-  String _cleanPriceString(String priceStr) {
-    return priceStr
-        .replaceAll('О', '0')
-        .replaceAll('о', '0')
-        .replaceAll('З', '3')
-        .replaceAll('з', '3')
-        .replaceAll('б', '6')
-        .replaceAll('В', '8')
-        .replaceAll('—', '.')
-        .replaceAll('-', '.')
-        .replaceAll(',', '.');
-  }
-
   List<BillItem> _extractItemsFromLines(List<String> rawLines) {
     final List<BillItem> parsed = [];
-    final priceRegex = RegExp(r'(\d+[.,—\-]\d{2})|(\b\d{2,5}\b)');
+    final priceRegex = RegExp(r'(\d+[.,]\d{2})|(\b\d{2,5}\b)');
     String pendingTitle = '';
 
     for (var raw in rawLines) {
       var line = raw.trim();
       if (line.isEmpty || _isServiceLine(line)) continue;
 
+      // Пропуск строк умножения количества вида "1.000 * 350.00"
       if (RegExp(r'^\s*([0-9.,]+)\s*(\*|x|х)\s*([0-9.,]+)').hasMatch(line)) {
         continue;
       }
@@ -148,8 +135,8 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
       final matches = priceRegex.allMatches(line).toList();
       if (matches.isNotEmpty) {
         final lastMatch = matches.last;
-        final cleanP = _cleanPriceString(lastMatch.group(0)!);
-        final priceVal = double.tryParse(cleanP);
+        final priceStr = lastMatch.group(0)!.replaceAll(',', '.');
+        final priceVal = double.tryParse(priceStr);
 
         var titlePart = line.substring(0, lastMatch.start).replaceAll(RegExp(r'[-=:#*.]+'), ' ').trim();
         if (titlePart.isEmpty && pendingTitle.isNotEmpty) {
@@ -178,7 +165,7 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     if (candidateItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Не удалось найти позиции с ценами. Попробуйте надиктовать голосом или ввести через QR.'),
+          content: Text('Не удалось найти позиции с ценами. Сделайте фото ровнее или используйте QR / голосовой ввод.'),
         ),
       );
       return;
@@ -191,7 +178,7 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Проверьте чек перед добавлением', style: TextStyle(fontSize: 18)),
+          title: Text('Проверьте чек (${localList.length} поз.)', style: const TextStyle(fontSize: 18)),
           content: SizedBox(
             width: double.maxFinite,
             height: 420,
@@ -279,25 +266,6 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
     );
   }
 
-  Future<File> _preprocessImage(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    img.Image? image = img.decodeImage(bytes);
-
-    if (image == null) return File(imagePath);
-
-    if (image.width > 1600) {
-      image = img.copyResize(image, width: 1600);
-    }
-
-    image = img.grayscale(image);
-    image = img.contrast(image, contrast: 150);
-
-    final preprocessedPath = '${imagePath}_prep.jpg';
-    final preprocessedFile = File(preprocessedPath);
-    await preprocessedFile.writeAsBytes(img.encodeJpg(image, quality: 90));
-    return preprocessedFile;
-  }
-
   Future<void> _scanReceiptPhotoAuto(ImageSource source) async {
     final XFile? file = await _picker.pickImage(
       source: source,
@@ -308,19 +276,11 @@ class _RestaurantSplitterScreenState extends State<RestaurantSplitterScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStatus = 'Очистка и повышение резкости чека...';
+      _processingStatus = 'Распознавание текста чека...';
     });
 
     try {
-      final processedFile = await _preprocessImage(file.path);
-
-      if (mounted) {
-        setState(() {
-          _processingStatus = 'Распознавание текста...';
-        });
-      }
-
-      final inputImage = InputImage.fromFile(processedFile);
+      final inputImage = InputImage.fromFile(File(file.path));
       final textRecognizer = TextRecognizer();
       final recognizedText = await textRecognizer.processImage(inputImage);
       await textRecognizer.close();
